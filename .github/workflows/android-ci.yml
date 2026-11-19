@@ -20,14 +20,27 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configure Android SDK, NDK, and CMake
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;26.3.11579264" "cmake;3.22.1"
 
       - name: Fetch llama.cpp for native JNI build
         run: |
           if [ ! -d "app/src/main/cpp/llama.cpp" ]; then
             git clone --depth 1 https://github.com/ggerganov/llama.cpp.git app/src/main/cpp/llama.cpp
           fi
+
+      - name: Download & Verify Bundled Qwen2.5-1.5B-Instruct-Q4_K_M GGUF Model
+        run: |
+          mkdir -p app/src/main/assets/models
+          MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+          MODEL_PATH="app/src/main/assets/models/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+          curl -fL --retry 3 -o "$MODEL_PATH" "$MODEL_URL"
+          ls -lh "$MODEL_PATH"
+          sha256sum "$MODEL_PATH"
+          # Verify GGUF magic header
+          head -c 4 "$MODEL_PATH" | grep -q "GGUF"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -39,6 +52,12 @@ jobs:
 
       - name: Build Debug APK
         run: gradle assembleDebug --no-daemon
+
+      - name: Verify APK Contents (Model Weights & ARM64 Native Libs)
+        run: |
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          ls -lh "$APK_PATH"
+          unzip -l "$APK_PATH" | grep -E "qwen2.5-1.5b-instruct-q4_k_m.gguf|libdigitallife_llama.so"
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
